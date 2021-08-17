@@ -1,3 +1,10 @@
+const path = require('path');
+require('dotenv').config({
+  path: (typeof process.env.DOTENV_PATH !== 'undefined')
+    ? path.resolve(process.cwd(), process.env.DOTENV_PATH)
+    : path.resolve(process.cwd(), '.env'),
+});
+
 const { ApolloServer, PubSub } = require("apollo-server");
 
 // Error handling
@@ -10,6 +17,7 @@ const { formatError } = require('./errors/formatError');
 
 const EVENTS = require('./src/events');
 const { typeDefs } = require('./src/schema');
+const bcrypt = require("bcrypt-nodejs");
 
 const checkPassword = require('./src/checkPassword'); 
 
@@ -19,7 +27,13 @@ const users = [
     username: 'Pero',
     password: '$2a$12$O1TQA8DweDP8RmnU89yHSeGALT.hm6DWBEQQ/iqgsqDO4AAwMhSZa',
     admin: true,
-  }
+  },
+  {
+    id: 2,
+    username: 'user2',
+    password: '$2a$12$jittI0x967FVh0m5DUcWT.W0cn2tiSZx13i.ApKlSqm9ABVEsJV/W',
+    admin: false,
+  },
 ];
 
 
@@ -56,25 +70,34 @@ const resolvers = {
     ])
   },
   Mutation: {
-    login: async (parent, { userInfo: { username } }, context) => {
+    login: async (parent, { userInfo: { username, password } }, context) => {
       // check the password
-      // await checkPassword(password);
-      throw new Error(errorDescriptor(ERROR_AUTHENTICATION_DATA_IS_MISSING));
-      return username;
+      const result = await checkPassword(username, password, users);
+
+      if (!result) {
+        throw new Error(errorDescriptor(ERROR_AUTHENTICATION_DATA_IS_MISSING));
+      } else {
+        return EVENTS.LOGIN_SUCCESS;
+      }
+
     },
-    register: (_, { userInfo: { username } }, { pubsub }) => {
+    register: (_, { userInfo: { username, password } }, { pubsub }) => {
+      const salt = bcrypt.genSaltSync(10);
+      const hash = bcrypt.hashSync(password, salt);
       const user = {
         id: 1,
-        username
+        username: username,
+        password: password        
       };
+
+      users.push(user);
 
       pubsub.publish(EVENTS.NEW_USER, {
         newUser: user
       });
 
-      return {
-        user
-      };
+      return EVENTS.REGISTRATION_SUCCESS;
+      
     }
   }
 };
@@ -95,5 +118,6 @@ const server = new ApolloServer({
   formatError,
 });
 
-server.listen(4001)
+const port = process.env.PORT;
+server.listen(port)
   .then(({ url }) => console.log(`Server started at ${url}`));
